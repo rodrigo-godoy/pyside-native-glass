@@ -1,0 +1,22 @@
+# --- Basura de macOS ---
+.DS_Store
+
+# --- Basura de Python (Caché) ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Distribución y Build (se crean al generar el paquete) ---
+build/
+dist/
+*.egg-info/
+
+# --- Entornos virtuales (si creas uno) ---
+venv/
+.venv/
+env/
+
+# --- Archivos temporales tuyos ---
+*.R
+temporal_review_files_dir.R

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pyside-native-glass"
+version = "0.1.0"
+description = "Efectos nativos de ventana (Glass/Acrylic/Mica) para aplicaciones PySide6 en Windows 11 y macOS."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Rodrigo Godoy", email = "iamrodrigogodoy@gmail.com" },
+]
+keywords = ["pyside6", "qt", "glassmorphism", "mica", "acrylic", "windows", "macos"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+  "Programming Language :: Python :: 3",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+]
+dependencies = [
+  "PySide6>=6.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/rodrigo-godoy/pyside-native-glass"
+Repository = "https://github.com/rodrigo-godoy/pyside-native-glass"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/native_glass"]
