@@ -1,125 +1,98 @@
 # src/native_glass/windows/window_effect.py
-import warnings
-from ctypes import WinDLL, c_bool, c_int, pointer, sizeof, byref
-from ctypes.wintypes import DWORD, LPCVOID
-
-from PySide6.QtGui import QColor
+from ctypes import byref, c_int, pointer, sizeof, windll
 
 from .c_structures import (
-    ACCENT_POLICY, ACCENT_STATE, WINDOWCOMPOSITIONATTRIB,
-    WINDOWCOMPOSITIONATTRIBDATA, DWMWINDOWATTRIBUTE, MARGINS
+    ACCENT_POLICY,
+    ACCENT_STATE,
+    DWMWINDOWATTRIBUTE,
+    MARGINS,
+    WINDOWCOMPOSITIONATTRIB,
+    WINDOWCOMPOSITIONATTRIBDATA,
 )
 from .win32_utils import is_win11
 
+
 class WindowsWindowEffect:
-    """Implementación de efectos nativos para Windows usando ctypes puro."""
+    def __init__(self, target):
+        self.target = target
 
-    def __init__(self, window):
-        self.window = window
-        
-        # Cargamos las librerías del sistema (DLLs)
-        self.user32 = WinDLL("user32")
-        self.dwmapi = WinDLL("dwmapi")
-        
-        # Mapeamos las funciones de la API de Windows
-        self.SetWindowCompositionAttribute = self.user32.SetWindowCompositionAttribute
-        self.DwmExtendFrameIntoClientArea = self.dwmapi.DwmExtendFrameIntoClientArea
-        self.DwmSetWindowAttribute = self.dwmapi.DwmSetWindowAttribute
+    def setMicaEffect(self, hwnd, isDarkMode=True, isAlt=False):
+        """
+        Aplica Mica (Opaco, tintado con wallpaper).
+        Solo funciona en Windows 11.
+        """
+        hwnd = int(hwnd)
 
-        # Definimos los tipos de retorno y argumentos para evitar crasheos en 64-bits
-        self.SetWindowCompositionAttribute.restype = c_bool
-        self.SetWindowCompositionAttribute.argtypes = [c_int, pointer(WINDOWCOMPOSITIONATTRIBDATA)]
-        
-        self.DwmSetWindowAttribute.restype = c_int
-        self.DwmSetWindowAttribute.argtypes = [c_int, DWORD, LPCVOID, DWORD]
-        
-        self.DwmExtendFrameIntoClientArea.restype = c_int
-        self.DwmExtendFrameIntoClientArea.argtypes = [c_int, pointer(MARGINS)]
-
-        # Inicializamos estructuras reutilizables
-        self.accentPolicy = ACCENT_POLICY()
-        self.winCompAttrData = WINDOWCOMPOSITIONATTRIBDATA()
-        self.winCompAttrData.Attribute = WINDOWCOMPOSITIONATTRIB.WCA_ACCENT_POLICY
-        self.winCompAttrData.SizeOfData = sizeof(self.accentPolicy)
-        self.winCompAttrData.Data = pointer(self.accentPolicy)
-
-    def setAcrylicEffect(self, hWnd, gradientColor="F2F2F299", enableShadow=True, animationId=0):
-        """Aplica efecto Acrylic (Windows 10+)."""
-        hWnd = int(hWnd)
-        
-        try:
-            # Procesamiento básico de color (ajustar según necesidad real)
-            # El string viene como RRGGBBAA, Windows espera AABBGGRR (casi)
-            gradientColor = ''.join(gradientColor[i:i+2] for i in range(6, -1, -2))
-            dwGradientColor = DWORD(int(gradientColor, base=16))
-        except ValueError:
-            dwGradientColor = DWORD(0)
-
-        accentFlags = DWORD(0x20 | 0x40 | 0x80 | 0x100) if enableShadow else DWORD(0)
-        
-        self.accentPolicy.AccentState = ACCENT_STATE.ACCENT_ENABLE_ACRYLICBLURBEHIND
-        self.accentPolicy.GradientColor = dwGradientColor
-        self.accentPolicy.AccentFlags = accentFlags
-        self.accentPolicy.AnimationId = DWORD(animationId)
-        
-        self.winCompAttrData.Attribute = WINDOWCOMPOSITIONATTRIB.WCA_ACCENT_POLICY
-        self.SetWindowCompositionAttribute(hWnd, pointer(self.winCompAttrData))
-
-    def setMicaEffect(self, hWnd, isDarkMode=False, isAlt=False):
-        """Aplica efecto Mica (Solo Windows 11)."""
         if not is_win11():
-            warnings.warn("El efecto Mica solo está disponible en Windows 11")
+            # Fallback a Acrylic si no es Win11
+            color = "20202099" if isDarkMode else "F2F2F299"
+            self.setAcrylicEffect(hwnd, color, isDarkMode)
             return
 
-        hWnd = int(hWnd)
-        
-        # Extendemos el marco al área del cliente (truco necesario para Mica)
-        margins = MARGINS(-1, -1, -1, -1) # -1 extiende a todo
-        self.DwmExtendFrameIntoClientArea(hWnd, byref(margins))
-
-        # Configurar la política de acento a HostBackdrop
-        self.accentPolicy.AccentState = ACCENT_STATE.ACCENT_ENABLE_HOSTBACKDROP
-        self.winCompAttrData.Attribute = WINDOWCOMPOSITIONATTRIB.WCA_ACCENT_POLICY
-        self.SetWindowCompositionAttribute(hWnd, pointer(self.winCompAttrData))
-
-        # Configurar modo oscuro inmersivo
-        value = c_int(1 if isDarkMode else 0)
-        self.DwmSetWindowAttribute(
-            hWnd, 
-            DWMWINDOWATTRIBUTE.DWMWA_USE_IMMERSIVE_DARK_MODE, 
-            byref(value), 
-            4
+        # 1. Configurar Modo Oscuro en la Barra de Título
+        darkMode = c_int(1 if isDarkMode else 0)
+        windll.dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            DWMWINDOWATTRIBUTE.DWMWA_USE_IMMERSIVE_DARK_MODE,
+            byref(darkMode),
+            sizeof(darkMode),
         )
 
-        # Configurar tipo de Mica (Normal o Alt)
-        # 2 = DWM_SYSTEMBACKDROP_TYPE.MICA
-        # 4 = DWM_SYSTEMBACKDROP_TYPE.TABBED (Mica Alt)
-        backdrop_value = c_int(4 if isAlt else 2)
-        self.DwmSetWindowAttribute(
-            hWnd,
+        # 2. Configurar Mica
+        # DWMWA_SYSTEMBACKDROP_TYPE: 2 = Mica, 4 = Mica Alt
+        backdropValue = c_int(4 if isAlt else 2)
+
+        windll.dwmapi.DwmSetWindowAttribute(
+            hwnd,
             DWMWINDOWATTRIBUTE.DWMWA_SYSTEMBACKDROP_TYPE,
-            byref(backdrop_value),
-            4
+            byref(backdropValue),
+            sizeof(backdropValue),
         )
 
-    def removeBackgroundEffect(self, hWnd):
-        """Elimina cualquier efecto de fondo y restaura la ventana normal."""
-        hWnd = int(hWnd)
-        self.accentPolicy.AccentState = ACCENT_STATE.ACCENT_DISABLED
-        self.SetWindowCompositionAttribute(hWnd, pointer(self.winCompAttrData))
+        # Extender frame al cliente para que se pinte el fondo
+        self._extend_frame(hwnd)
 
-    def setBorderAccentColor(self, hWnd, color: QColor):
-        """Establece el color del borde nativo (Windows 11)."""
-        if not is_win11():
-            return
-        
-        hWnd = int(hWnd)
-        # Windows usa formato 0x00BBGGRR
-        color_ref = DWORD(color.red() | (color.green() << 8) | (color.blue() << 16))
-        
-        self.DwmSetWindowAttribute(
-            hWnd,
-            DWMWINDOWATTRIBUTE.DWMWA_BORDER_COLOR,
-            byref(color_ref),
-            4
+    def setAcrylicEffect(self, hwnd, gradientColor="00000000", isDarkMode=True):
+        """
+        Aplica Acrylic (Blur translúcido).
+        Funciona en Win 10 y 11.
+        gradientColor: Hex String AABBGGRR.
+        """
+        hwnd = int(hwnd)
+
+        # Color hexadecimal a entero
+        # Se espera AABBGGRR en hex string
+        try:
+            color_int = int(gradientColor, 16)
+        except Exception:  # CORREGIDO: Usamos Exception en lugar de bare except
+            color_int = 0x99000000  # Fallback negro
+
+        accent = ACCENT_POLICY()
+        accent.AccentState = ACCENT_STATE.ACCENT_ENABLE_ACRYLICBLURBEHIND
+        accent.GradientColor = color_int
+        # Flags opcionales
+        accent.AccentFlags = (
+            2  # DrawLeftBorder | DrawTopBorder... a veces ayuda a bordes suaves
         )
+
+        data = WINDOWCOMPOSITIONATTRIBDATA()
+        data.Attribute = WINDOWCOMPOSITIONATTRIB.WCA_ACCENT_POLICY
+        data.SizeOfData = sizeof(accent)
+        data.Data = pointer(accent)
+
+        # Llamada a API no documentada de User32
+        windll.user32.SetWindowCompositionAttribute(hwnd, byref(data))
+
+        # También seteamos el modo oscuro para los controles de ventana
+        darkMode = c_int(1 if isDarkMode else 0)
+        windll.dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            DWMWINDOWATTRIBUTE.DWMWA_USE_IMMERSIVE_DARK_MODE,
+            byref(darkMode),
+            sizeof(darkMode),
+        )
+
+    def _extend_frame(self, hwnd):
+        # Mágia negra para quitar el fondo sólido de Win32 y dejar ver el DWM
+        margins = MARGINS(-1, -1, -1, -1)
+        windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, byref(margins))

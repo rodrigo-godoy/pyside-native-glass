@@ -3,24 +3,33 @@ from .mac_utils import get_ns_view
 
 class MacWidgetEffect:
     """
-    Especialista en Widgets: Solo aplica cristal a componentes internos.
-    NO toca la configuración de la ventana padre.
+    Especialista en Widgets: Aplica cristal a componentes internos.
+    Ahora soporta forzado de modo (Dark/Light).
     """
-    def set_effect(self, widget_id, material_name="sidebar"):
-        # 1. Obtener la vista del widget específico
+    def set_effect(self, widget_id, material_name="sidebar", mode="system"):
+        # 1. Obtener la vista
         target_view = get_ns_view(widget_id)
         if target_view is None:
             return
 
-        # 2. Limpieza quirúrgica: Solo quitamos efectos viejos en ESTE widget
+        # 2. Limpieza
         for subview in target_view.subviews():
             if isinstance(subview, Cocoa.NSVisualEffectView):
                 subview.removeFromSuperview()
 
-        # 3. Crear el cristal local
+        # 3. Crear cristal
         vev = Cocoa.NSVisualEffectView.alloc().initWithFrame_(target_view.bounds())
         vev.setAutoresizingMask_(Cocoa.NSViewWidthSizable | Cocoa.NSViewHeightSizable)
         
+        # --- NUEVO: FORZAR MODO EN EL WIDGET ---
+        if mode == "dark":
+            vev.setAppearance_(Cocoa.NSAppearance.appearanceNamed_("NSAppearanceNameDarkAqua"))
+        elif mode == "light":
+            vev.setAppearance_(Cocoa.NSAppearance.appearanceNamed_("NSAppearanceNameAqua"))
+        else:
+            vev.setAppearance_(None) # Hereda del sistema
+        # ---------------------------------------
+
         materials = {
             "sidebar": Cocoa.NSVisualEffectMaterialSidebar,
             "header": Cocoa.NSVisualEffectMaterialHeaderView,
@@ -36,5 +45,4 @@ class MacWidgetEffect:
         vev.setBlendingMode_(Cocoa.NSVisualEffectBlendingModeBehindWindow)
         vev.setState_(Cocoa.NSVisualEffectStateActive)
 
-        # 4. Pegar al fondo del widget (-1)
         target_view.addSubview_positioned_relativeTo_(vev, -1, None)

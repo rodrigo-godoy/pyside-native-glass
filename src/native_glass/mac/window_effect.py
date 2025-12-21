@@ -2,31 +2,36 @@ import Cocoa
 from .mac_utils import get_ns_view
 
 class MacWindowEffect:
-    """
-    Especialista en Ventanas: Configura el lienzo global.
-    """
     def __init__(self, window):
         self.window = window
 
-    def set_mac_effect(self, win_id, material_name="sidebar"):
-        # Obtenemos la vista
+    def set_mac_effect(self, win_id, material_name="sidebar", mode="system"):
         target_view = get_ns_view(win_id)
         if target_view is None:
             return
 
-        # Obtenemos la ventana nativa (NSWindow)
         ns_window = target_view.window()
         if not ns_window:
             return
 
-        # CONFIGURACIÓN ESTRUCTURAL (Solo para ventanas)
+        # Configuración Base
         ns_window.setOpaque_(False)
         ns_window.setBackgroundColor_(Cocoa.NSColor.clearColor())
         ns_window.setStyleMask_(ns_window.styleMask() | Cocoa.NSFullSizeContentViewWindowMask)
         ns_window.setTitlebarAppearsTransparent_(True)
         ns_window.setTitleVisibility_(Cocoa.NSWindowTitleVisible)
 
-        # Inyectamos el cristal en el ContentView global
+        # --- LOGICA DE FORZADO DE MODO (NUEVO) ---
+        if mode == "dark":
+            # Forzamos apariencia oscura (Dark Aqua)
+            ns_window.setAppearance_(Cocoa.NSAppearance.appearanceNamed_("NSAppearanceNameDarkAqua"))
+        elif mode == "light":
+            # Forzamos apariencia clara (Aqua)
+            ns_window.setAppearance_(Cocoa.NSAppearance.appearanceNamed_("NSAppearanceNameAqua"))
+        else:
+            # System: null deja que el sistema decida
+            ns_window.setAppearance_(None)
+
         self._inject_glass(ns_window.contentView(), material_name)
 
     def _inject_glass(self, view, material_name):

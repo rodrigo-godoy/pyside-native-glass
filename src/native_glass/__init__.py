@@ -16,11 +16,11 @@ class GlassStyle(Enum):
 class NativeGlassWidget(QWidget):
     """
     EL WIDGET MÁGICO.
-    Ya trae toda la arquitectura de 'Escudo' pre-configurada.
     """
-    def __init__(self, style=GlassStyle.SIDEBAR, parent=None):
+    def __init__(self, style=GlassStyle.SIDEBAR, mode="system", parent=None):
         super().__init__(parent)
         self._style = style
+        self._mode = mode  # Guardamos la preferencia
         
         # 1. Capa Fondo (Cristal)
         self.setAttribute(Qt.WA_NativeWindow)
@@ -43,13 +43,13 @@ class NativeGlassWidget(QWidget):
         
         self._main_layout.addWidget(self._content_widget)
         
-        # Exponemos el layout interno
         self.layout = QVBoxLayout(self._content_widget)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
     def showEvent(self, event):
         super().showEvent(event)
-        apply_glass(self, style=self._style)
+        # Pasamos el modo al aplicar
+        apply_glass(self, style=self._style, mode=self._mode)
     
     def addWidget(self, widget):
         self.layout.addWidget(widget)
@@ -62,31 +62,67 @@ class NativeGlassWidget(QWidget):
         self.layout = layout
         self._content_widget.setLayout(layout)
 
-# --- FUNCIÓN DE APLICACIÓN ---
-def apply_glass(target_object, style=GlassStyle.SIDEBAR, is_dark=True):
+# --- FUNCIÓN DE APLICACIÓN MAESTRA ---
+def apply_glass(target_object, style=GlassStyle.SIDEBAR, mode="system"):
+    """
+    Aplica el efecto.
+    mode: "system" (sigue al OS), "dark" (fuerza oscuro), "light" (fuerza claro)
+    """
     oid = int(target_object.winId())
+
+    # 1. Resolver si debe ser oscuro
+    use_dark = False
+    if mode == "dark":
+        use_dark = True
+    elif mode == "light":
+        use_dark = False
+    else:
+        use_dark = is_dark_mode() # Detección automática
 
     if sys.platform == "darwin":
         is_window = target_object.isWindow() 
         if is_window:
             from .mac.window_effect import MacWindowEffect
             effect = MacWindowEffect(target_object)
-            effect.set_mac_effect(oid, material_name=style.value)
+            # Pasamos el 'mode' string explícito a Mac para que use setAppearance
+            effect.set_mac_effect(oid, material_name=style.value, mode=mode)
         else:
             from .mac.widget_effect import MacWidgetEffect
             effect = MacWidgetEffect()
+            # Los widgets heredan, pero podríamos forzar material
             effect.set_effect(oid, material_name=style.value)
 
     elif sys.platform == "win32":
         from .windows.window_effect import WindowsWindowEffect
         effect = WindowsWindowEffect(target_object)
-        if style in [GlassStyle.SIDEBAR, GlassStyle.HEADER]:
-            effect.setMicaEffect(oid, isDarkMode=is_dark, isAlt=False)
-        else:
-            color = "20202099" if is_dark else "F2F2F299"
-            effect.setAcrylicEffect(oid, gradientColor=color)
+        
+        # --- MAPA DE TRADUCCIÓN MAC -> WINDOWS ---
+        
+        # Grupo 1: Superficies Base -> MICA (Standard)
+        if style in [GlassStyle.SIDEBAR, GlassStyle.HEADER, GlassStyle.FULL]:
+            effect.setMicaEffect(oid, isDarkMode=use_dark, isAlt=False)
+            
+        # Grupo 2: Superficies Secundarias -> MICA ALT (Tabbed)
+        elif style in [GlassStyle.SHEET, GlassStyle.POPOVER]:
+            effect.setMicaEffect(oid, isDarkMode=use_dark, isAlt=True)
+            
+        # Grupo 3: Superficies Flotantes -> ACRYLIC (Translucidez real)
+        else: # HUD, MENU
+            # Configuración personalizada de Acrylic para imitar HUD
+            # Hex: AABBGGRR (Alpha, Blue, Green, Red) en memoria, o Hex String
+            # Windows Acrylic Gradient Color: AABBGGRR en hex string
+            if style == GlassStyle.HUD:
+                # HUD es oscuro y muy transparente
+                # Si forzamos Dark: Negro al 60% opacity -> 99000000 (aprox)
+                # Si forzamos Light: Blanco al 60% -> 99FFFFFF
+                color = "99101010" if use_dark else "99E0E0E0"
+            else:
+                # Menu estándar
+                color = "CC202020" if use_dark else "CCF2F2F2"
+                
+            effect.setAcrylicEffect(oid, gradientColor=color, isDarkMode=use_dark)
 
-# --- DETECTOR DE MODO OSCURO ---
+# --- DETECTOR ---
 def is_dark_mode(app_instance=None):
     if not app_instance:
         app_instance = QApplication.instance()
@@ -96,7 +132,6 @@ def is_dark_mode(app_instance=None):
     try:
         return app_instance.styleHints().colorScheme() == Qt.ColorScheme.Dark
     except Exception:
-        # Fallback genérico seguro
         try:
             text_color = app_instance.palette().color(QPalette.WindowText)
             return text_color.lightness() > 128

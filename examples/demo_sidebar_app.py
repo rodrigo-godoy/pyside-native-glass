@@ -4,7 +4,6 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout,
                              QVBoxLayout, QPushButton, QLabel, QFrame, 
                              QSpacerItem, QSizePolicy)
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 from native_glass import apply_glass, GlassStyle, NativeGlassWidget
