@@ -1,4 +1,7 @@
-# PySide Native Glass
+import os
+
+# --- CONTENIDO DEL README (Definido aquí para evitar errores de sintaxis) ---
+README_CONTENT = """# PySide Native Glass
 
 Librería para aplicar efectos de Glassmorphism nativos (Mica/Acrylic en Windows 11 y NSVisualEffectView en macOS) en aplicaciones PySide6.
 
@@ -19,3 +22,25 @@ Librería para aplicar efectos de Glassmorphism nativos (Mica/Acrylic en Windows
 
 ## Instalación
 (Próximamente)
+"""
+
+def create_file(filename, content):
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"[OK] Archivo '{filename}' generado correctamente.")
+    except Exception as e:
+        print(f"[ERROR] No se pudo crear '{filename}': {e}")
+
+def main():
+    print("--- INICIANDO REPARACION ---")
+    
+    # 1. Generar README.md
+    create_file("README.md", README_CONTENT)
+
+    # Puedes agregar aquí más llamadas a create_file si el script generaba otros archivos
+
+    print("--- PROCESO FINALIZADO ---")
+
+if __name__ == "__main__":
+    main()

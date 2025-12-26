@@ -1,9 +1,11 @@
 import sys
+import os
 from enum import Enum
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QApplication
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QApplication, QPushButton
+from PySide6.QtCore import Qt, Signal, QObject
+from PySide6.QtGui import QPalette, QColor, QPainter
 
+# --- 1. ENUMS ---
 class GlassStyle(Enum):
     SIDEBAR = "sidebar"
     HEADER = "header"
@@ -13,127 +15,258 @@ class GlassStyle(Enum):
     MENU = "menu"
     FULL = "underWindow"
 
+# --- 2. MOTOR DE TEMAS ---
+class ThemeManager(QObject):
+    mode_changed = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self._mode = "system"
+        self._semantic_colors = {}
+        self._assets_path = "assets"
+        # Registramos colores base por defecto
+        self.register_color("btn_hover", day="#E5E5E5", night="#3A3A3A")
+
+    def set_assets_path(self, path):
+        self._assets_path = path
+
+    def set_mode(self, mode):
+        self._mode = mode
+        real_mode = self.get_current_mode()
+        self._apply_qt_palette(real_mode)
+        self.mode_changed.emit(real_mode)
+        
+        # Refresco agresivo de estilos
+        app = QApplication.instance()
+        if app:
+            for widget in app.topLevelWidgets():
+                self._force_style_refresh(widget)
+
+    def _force_style_refresh(self, widget):
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        for child in widget.findChildren(QWidget):
+            child.style().unpolish(child)
+            child.style().polish(child)
+        widget.update()
+
+    def get_current_mode(self):
+        if self._mode in ["dark", "light"]:
+            return self._mode
+        app = QApplication.instance()
+        if not app:
+            return "light"
+        try:
+            return "dark" if app.styleHints().colorScheme() == Qt.ColorScheme.Dark else "light"
+        except Exception:
+            return "light"
+
+    def register_color(self, name, day, night=None):
+        if night is None:
+            night = self._calculate_dark_variant(day)
+        self._semantic_colors[name] = {"light": day, "dark": night}
+
+    def get_color(self, name):
+        mode = self.get_current_mode()
+        if name in self._semantic_colors:
+            return QColor(self._semantic_colors[name][mode])
+        return QColor(name)
+
+    def get_asset(self, filename):
+        mode = self.get_current_mode()
+        if mode == "light":
+            return os.path.join(self._assets_path, filename)
+        base, ext = os.path.splitext(filename)
+        dark_name = f"{base}_dark{ext}"
+        full_dark = os.path.join(self._assets_path, dark_name)
+        if os.path.exists(full_dark):
+            return full_dark
+        return os.path.join(self._assets_path, filename)
+
+    def _calculate_dark_variant(self, hex_color):
+        c = QColor(hex_color)
+        h, s, lum = c.getHslF()  # FIX: 'l' changed to 'lum'
+        new_lum = 1.0 - lum
+        new_s = s * 0.8 if new_lum < 0.5 else s
+        return QColor.fromHslF(h, new_s, new_lum).name()
+
+    def _apply_qt_palette(self, mode):
+        app = QApplication.instance()
+        if not app:
+            return
+        palette = QPalette()
+        if mode == "dark":
+            base = QColor(30, 30, 30)
+            text = QColor(255, 255, 255)
+            palette.setColor(QPalette.WindowText, text)
+            palette.setColor(QPalette.Text, text)
+            palette.setColor(QPalette.ButtonText, text)
+            palette.setColor(QPalette.Window, base)
+            palette.setColor(QPalette.Base, base)
+        else:
+            base = QColor(255, 255, 255)
+            text = QColor(0, 0, 0)
+            palette.setColor(QPalette.WindowText, text)
+            palette.setColor(QPalette.Text, text)
+            palette.setColor(QPalette.ButtonText, text)
+            palette.setColor(QPalette.Window, base)
+            palette.setColor(QPalette.Base, base)
+        app.setPalette(palette)
+
+GlassTheme = ThemeManager()
+
+# --- 3. COMPONENTES UI ---
+
+class GlassButton(QPushButton):
+    def __init__(self, text, color_role=None, parent=None):
+        super().__init__(text, parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(34)
+        self._color_role = color_role
+        GlassTheme.mode_changed.connect(self._update_style)
+        self._update_style()
+
+    def _update_style(self, mode=None):
+        if self._color_role:
+            text_col = GlassTheme.get_color(self._color_role).name()
+        else:
+            text_col = "palette(text)"
+        hover_col = GlassTheme.get_color("btn_hover").name()
+        
+        self.setStyleSheet(f"""
+            QPushButton {{
+                color: {text_col};
+                background-color: transparent;
+                border: none;
+                border-radius: 6px;
+                text-align: left;
+                padding-left: 15px;
+                font-size: 13px;
+                font-family: '.AppleSystemUIFont', 'Segoe UI';
+                opacity: 0.9;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_col};
+                font-weight: 600;
+            }}
+        """)
+
+# --- 4. WIDGET PRINCIPAL ---
 class NativeGlassWidget(QWidget):
-    """
-    EL WIDGET MÁGICO.
-    """
-    def __init__(self, style=GlassStyle.SIDEBAR, mode="system", parent=None):
+    def __init__(self, style=GlassStyle.SIDEBAR, parent=None):
         super().__init__(parent)
         self._style = style
-        self._mode = mode  # Guardamos la preferencia
+        GlassTheme.mode_changed.connect(self._on_mode_changed)
         
-        # 1. Capa Fondo (Cristal)
-        self.setAttribute(Qt.WA_NativeWindow)
-        self.setAttribute(Qt.WA_NoSystemBackground)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setStyleSheet("background: transparent;")
         pal = self.palette()
         pal.setColor(QPalette.Window, Qt.transparent)
         self.setPalette(pal)
 
-        # Layout del Padre
-        self._main_layout = QVBoxLayout(self)
-        self._main_layout.setContentsMargins(0, 0, 0, 0)
-        self._main_layout.setSpacing(0)
+        self._layout_proxy = None
 
-        # 2. Capa Escudo (Contenido Seguro)
-        self._content_widget = QWidget()
-        self._content_widget.setAttribute(Qt.WA_NativeWindow)
-        self._content_widget.setAttribute(Qt.WA_TranslucentBackground)
-        self._content_widget.setStyleSheet("background: transparent;")
+        if sys.platform == "darwin":
+            self.setAttribute(Qt.WA_NativeWindow, True)
+            self.setAttribute(Qt.WA_NoSystemBackground, True)
+            self._root_layout = QVBoxLayout(self)
+            self._root_layout.setContentsMargins(0, 0, 0, 0)
+            self._root_layout.setSpacing(0)
+            self._shield = QWidget()
+            self._shield.setAttribute(Qt.WA_NativeWindow, True)
+            self._shield.setAttribute(Qt.WA_TranslucentBackground, True)
+            self._shield.setStyleSheet("background: transparent;")
+            self._root_layout.addWidget(self._shield)
+            self._layout_proxy = QVBoxLayout(self._shield)
+        elif sys.platform == "win32":
+            self.setAttribute(Qt.WA_NoSystemBackground, False)
+            self.setAttribute(Qt.WA_NativeWindow, False)
+            self._shield = None
+            self._layout_proxy = QVBoxLayout(self)
+
+        self._layout_proxy.setContentsMargins(0, 0, 0, 0)
+        self._layout_proxy.setSpacing(0)
+
+    def addWidget(self, widget, stretch=0, alignment=Qt.Alignment()):
+        self._layout_proxy.addWidget(widget, stretch, alignment)
+
+    def addLayout(self, layout, stretch=0):
+        self._layout_proxy.addLayout(layout, stretch)
+
+    def addStretch(self, stretch=0):
+        self._layout_proxy.addStretch(stretch)
         
-        self._main_layout.addWidget(self._content_widget)
-        
-        self.layout = QVBoxLayout(self._content_widget)
-        self.layout.setContentsMargins(0, 0, 0, 0)
+    def addSpacing(self, size):
+        self._layout_proxy.addSpacing(size)
+
+    def setLayout(self, layout):
+        if sys.platform == "darwin":
+            QWidget().setLayout(self._layout_proxy) 
+            self._layout_proxy = layout
+            self._shield.setLayout(layout)
+        else:
+            super().setLayout(layout)
+            self._layout_proxy = layout
+
+    def contentLayout(self):
+        return self._layout_proxy
 
     def showEvent(self, event):
         super().showEvent(event)
-        # Pasamos el modo al aplicar
-        apply_glass(self, style=self._style, mode=self._mode)
-    
-    def addWidget(self, widget):
-        self.layout.addWidget(widget)
-        
-    def addLayout(self, layout):
-        self.layout.addLayout(layout)
-        
-    def setContentLayout(self, layout):
-        QWidget().setLayout(self.layout)
-        self.layout = layout
-        self._content_widget.setLayout(layout)
+        if sys.platform == "win32":
+            self.window().repaint()
+        self._apply_effect()
 
-# --- FUNCIÓN DE APLICACIÓN MAESTRA ---
-def apply_glass(target_object, style=GlassStyle.SIDEBAR, mode="system"):
-    """
-    Aplica el efecto.
-    mode: "system" (sigue al OS), "dark" (fuerza oscuro), "light" (fuerza claro)
-    """
+    def _on_mode_changed(self, mode):
+        self._apply_effect()
+        self.update()
+
+    def paintEvent(self, event):
+        if sys.platform == "win32":
+            painter = QPainter(self)
+            painter.setCompositionMode(QPainter.CompositionMode_Clear)
+            painter.fillRect(self.rect(), Qt.transparent)
+        else:
+            super().paintEvent(event)
+
+    def _apply_effect(self):
+        mode = GlassTheme.get_current_mode()
+        apply_glass_logic(self, self._style, mode)
+
+def apply_glass_logic(target_object, style, mode):
     oid = int(target_object.winId())
-
-    # 1. Resolver si debe ser oscuro
-    use_dark = False
-    if mode == "dark":
-        use_dark = True
-    elif mode == "light":
-        use_dark = False
-    else:
-        use_dark = is_dark_mode() # Detección automática
+    use_dark = (mode == "dark")
 
     if sys.platform == "darwin":
         is_window = target_object.isWindow() 
         if is_window:
             from .mac.window_effect import MacWindowEffect
             effect = MacWindowEffect(target_object)
-            # Pasamos el 'mode' string explícito a Mac para que use setAppearance
             effect.set_mac_effect(oid, material_name=style.value, mode=mode)
         else:
             from .mac.widget_effect import MacWidgetEffect
             effect = MacWidgetEffect()
-            # Los widgets heredan, pero podríamos forzar material
-            effect.set_effect(oid, material_name=style.value)
+            effect.set_effect(oid, material_name=style.value, mode=mode)
 
     elif sys.platform == "win32":
         from .windows.window_effect import WindowsWindowEffect
         effect = WindowsWindowEffect(target_object)
         
-        # --- MAPA DE TRADUCCIÓN MAC -> WINDOWS ---
-        
-        # Grupo 1: Superficies Base -> MICA (Standard)
-        if style in [GlassStyle.SIDEBAR, GlassStyle.HEADER, GlassStyle.FULL]:
-            effect.setMicaEffect(oid, isDarkMode=use_dark, isAlt=False)
+        bg = "101010" if use_dark else "FFFFFF"
+        alpha = "CC"
+        if style in [GlassStyle.SIDEBAR, GlassStyle.FULL]:
+            alpha = "CC" if use_dark else "99"
+        elif style in [GlassStyle.HEADER, GlassStyle.SHEET]:
+            alpha = "99" if use_dark else "80"
+        elif style in [GlassStyle.MENU, GlassStyle.POPOVER]:
+            alpha = "66" if use_dark else "4D"
+        elif style == GlassStyle.HUD:
+            alpha = "0A"
             
-        # Grupo 2: Superficies Secundarias -> MICA ALT (Tabbed)
-        elif style in [GlassStyle.SHEET, GlassStyle.POPOVER]:
-            effect.setMicaEffect(oid, isDarkMode=use_dark, isAlt=True)
-            
-        # Grupo 3: Superficies Flotantes -> ACRYLIC (Translucidez real)
-        else: # HUD, MENU
-            # Configuración personalizada de Acrylic para imitar HUD
-            # Hex: AABBGGRR (Alpha, Blue, Green, Red) en memoria, o Hex String
-            # Windows Acrylic Gradient Color: AABBGGRR en hex string
-            if style == GlassStyle.HUD:
-                # HUD es oscuro y muy transparente
-                # Si forzamos Dark: Negro al 60% opacity -> 99000000 (aprox)
-                # Si forzamos Light: Blanco al 60% -> 99FFFFFF
-                color = "99101010" if use_dark else "99E0E0E0"
-            else:
-                # Menu estándar
-                color = "CC202020" if use_dark else "CCF2F2F2"
-                
-            effect.setAcrylicEffect(oid, gradientColor=color, isDarkMode=use_dark)
+        color_hex = f"{alpha}{bg}"
+        effect.setAcrylicEffect(oid, gradientColor=color_hex, isDarkMode=use_dark)
 
-# --- DETECTOR ---
-def is_dark_mode(app_instance=None):
-    if not app_instance:
-        app_instance = QApplication.instance()
-        if not app_instance:
-            return False
-            
-    try:
-        return app_instance.styleHints().colorScheme() == Qt.ColorScheme.Dark
-    except Exception:
-        try:
-            text_color = app_instance.palette().color(QPalette.WindowText)
-            return text_color.lightness() > 128
-        except Exception:
-            return False
+def apply_glass(target_object, style=GlassStyle.SIDEBAR, mode=None):
+    if mode is None:
+        mode = GlassTheme.get_current_mode()
+    apply_glass_logic(target_object, style, mode)
