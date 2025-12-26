@@ -21,8 +21,11 @@ pyside-native-glass is a wrapper library that applies native background blur eff
 | `GlassStyle.POPOVER` | `popover` | Acrylic (Low Opacity) | For floating menus. |
 | `GlassStyle.HUD` | `hudWindow` | Acrylic (Ghost Opacity) | For OSDs (very transparent). |
 
-## Instalación
-(Próximamente)
+## Install
+
+```Python
+pip install git+https://github.com/rodrigo-godoy/pyside-native-glass.git
+```
 
 ## Usage Guide
 1. The Smart Container (NativeGlassWidget)
