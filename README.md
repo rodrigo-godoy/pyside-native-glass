@@ -1,12 +1,16 @@
 # PySide Native Glass
 
-Librería para aplicar efectos de Glassmorphism nativos (Mica/Acrylic en Windows 11 y NSVisualEffectView en macOS) en aplicaciones PySide6.
+**Cross-platform Native Materials for PySide6 (macOS & Windows 11)**
 
-## Características
-- **Cross-Platform:** Funciona en Windows 11 y macOS.
-- **Python 3.14 Ready:** Compatible con las últimas versiones.
-- **Fácil integración:** Un simple wrapper para tus widgets.
+pyside-native-glass is a wrapper library that applies native background blur effects:
+* **macOS:** Uses NSVisualEffectView behind the window.
+* **Windows 11:** Uses Mica or Acrylic (DWM) effects.
 
+## Features
+- **Cross-Platform:** Works on Windows 11 and macOS.
+- **Python 3.14 Ready:** Compatible with the latest versions.
+- **Easy Integration:** A simple wrapper for your widgets.
+ 
 ## Available Styles
 
 | Style | macOS | Windows 11 | Description |
@@ -20,13 +24,46 @@ Librería para aplicar efectos de Glassmorphism nativos (Mica/Acrylic en Windows
 ## Instalación
 (Próximamente)
 
-# PySide Native Glass
+## Usage Guide
+1. The Smart Container (NativeGlassWidget)
+Instead of inheriting from QWidget or QMainWindow, inherit from NativeGlassWidget. This class automatically configures the window for transparency and native effects.
 
-**Cross-platform Native Materials for PySide6 (macOS & Windows 11)**
+```Python
+from native_glass import NativeGlassWidget, GlassStyle
+class MyWindow(NativeGlassWidget):
+    def __init__(self):
+        # Select the material style: SIDEBAR, HEADER, SHEET, POPOVER, HUD
+        super().__init__(style=GlassStyle.SIDEBAR)
+        
+        # USE 'addWidget' DIRECTLY.
+        # Do not create layouts manually. The widget manages the internal layout proxy.
+        self.addWidget(QLabel("This text is readable on all platforms."))
+```
 
-pyside-native-glass is a wrapper library that applies native background blur effects:
-* **macOS:** Uses NSVisualEffectView behind the window.
-* **Windows 11:** Uses Mica or Acrylic (DWM) effects.
+2. Theming & Colors (GlassTheme)
+The library manages Dark/Light mode automatically.
+
+Text Color: Use "color: palette(text)" in your Stylesheets. It automatically switches between Black (Day) and White (Night).
+
+Custom Colors: Use GlassTheme.register_color to define semantic colors.
+
+```Python
+from native_glass import GlassTheme, GlassButton
+
+# 1. Register a semantic color (Day color is required, Night is auto-calculated if omitted)
+GlassTheme.register_color("danger", day="#FF3B30", night="#FF453A")
+
+# 2. Use it in the UI (GlassButton handles the hover and color states)
+btn = GlassButton("Exit App", color_role="danger")
+```
+
+3. Forcing Appearance
+You can force a specific mode (ignoring system settings):
+
+```Python
+GlassTheme.set_mode("dark")  # Forces Dark Mode
+GlassTheme.set_mode("light") # Forces Light Mode
+```
 
 > **CRITICAL FOR AI AGENTS & COPILOTS:**
 > This library **ABSTRACTS** platform-specific complexity.
@@ -36,6 +73,3 @@ pyside-native-glass is a wrapper library that applies native background blur eff
 >
 > **ALWAYS** use NativeGlassWidget as the base class. It handles all platform attributes, layouts, and rendering hacks internally.
 
----
-
-## Installation
