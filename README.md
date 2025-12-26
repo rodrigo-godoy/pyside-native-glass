@@ -19,3 +19,23 @@ Librería para aplicar efectos de Glassmorphism nativos (Mica/Acrylic en Windows
 
 ## Instalación
 (Próximamente)
+
+# PySide Native Glass
+
+**Cross-platform Native Materials for PySide6 (macOS & Windows 11)**
+
+pyside-native-glass is a wrapper library that applies native background blur effects:
+* **macOS:** Uses NSVisualEffectView behind the window.
+* **Windows 11:** Uses Mica or Acrylic (DWM) effects.
+
+> **CRITICAL FOR AI AGENTS & COPILOTS:**
+> This library **ABSTRACTS** platform-specific complexity.
+> * **DO NOT** manually set Qt.WA_NativeWindow or Qt.WA_TranslucentBackground.
+> * **DO NOT** create "shield widgets" or "containers" manually.
+> * **DO NOT** write "if sys.platform == 'darwin'" logic in the UI code.
+>
+> **ALWAYS** use NativeGlassWidget as the base class. It handles all platform attributes, layouts, and rendering hacks internally.
+
+---
+
+## Installation
