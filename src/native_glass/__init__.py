@@ -146,33 +146,34 @@ class GlassButton(QPushButton):
             }}
         """)
 
-# --- 4. WIDGET INTELIGENTE ---
+# --- 4. WIDGET NATIVO (ADAPTATIVO) ---
 class NativeGlassWidget(QWidget):
     """
-    Widget que maneja automáticamente la diferencia entre macOS y Windows.
-    - macOS: Siempre Nativo (anidado).
-    - Windows: Nativo solo si es TopLevel. Simulado (Tinte) si es Hijo.
+    Widget que adapta dinámicamente su comportamiento.
+    Acepta cualquier argumento (**kwargs) para compatibilidad total con interface.py.
     """
     def __init__(self, style=GlassStyle.SIDEBAR, parent=None, **kwargs):
-        # Aceptamos **kwargs para absorber 'corner_mask' u otros argumentos de interface.py
-        # sin romper la ejecución.
+        # **kwargs ABSORBE 'corner_mask' Y CUALQUIER OTRA COSA QUE INTERFACE.PY ENVIE
         super().__init__(parent)
         self._style = style
-        self._border_radius = 0
-        self._is_simulated_mode = False # Flag para Windows Children
+        self._border_radius = 0 
         
+        # Detectamos si nos pasaron corner_mask, aunque en Windows simulado
+        # solo usaremos radius global por ahora.
+        self._corner_mask = kwargs.get('corner_mask', None)
+
         GlassTheme.mode_changed.connect(self._on_mode_changed)
         
-        # Configuración Base: Transparencia obligatoria en Qt
+        # Base: Transparencia obligatoria
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setStyleSheet("background: transparent;")
         
         self._layout_proxy = None
         self._shield = None
+        self._is_simulated = False # Flag para saber si estamos simulando (Windows Child)
 
         if sys.platform == "darwin":
-            # --- MAC OS: MODO NATIVO PURO ---
-            # macOS maneja bien la anidación. Usamos la estructura de Shield.
+            # --- MAC OS: SIEMPRE NATIVO ---
             self.setAttribute(Qt.WA_NativeWindow, True)
             self.setAttribute(Qt.WA_NoSystemBackground, True)
             
@@ -188,34 +189,44 @@ class NativeGlassWidget(QWidget):
             self._root_layout.addWidget(self._shield)
             self._layout_proxy = QVBoxLayout(self._shield)
             
-            # Exponemos content_layout para interface.py
+            # Exponer layout para compatibilidad
             self.content_layout = self._layout_proxy
             
         elif sys.platform == "win32":
-            # --- WINDOWS: MODO DIFERIDO ---
-            # NO activamos WA_NativeWindow aquí. Esperamos a showEvent para decidir.
-            self.setAttribute(Qt.WA_NoSystemBackground, True)
+            # --- WINDOWS: INICIO LIMPIO ---
+            # NO activamos WA_NativeWindow aquí. 
+            # Esto permite que el widget nazca "ligero". Si luego es hijo, se queda ligero.
+            # Si es ventana, se vuelve nativo en showEvent.
             
-            # Layout directo (sin shield, para evitar problemas de resize en Windows)
+            self.setAttribute(Qt.WA_NoSystemBackground, True)
             self._layout_proxy = QVBoxLayout(self)
             self.content_layout = self._layout_proxy
 
         self._layout_proxy.setContentsMargins(0, 0, 0, 0)
         self._layout_proxy.setSpacing(0)
 
-    # --- API ---
+    # --- API COMPATIBILIDAD ---
+    # Métodos que interface.py podría llamar
+    
     def addWidget(self, widget, stretch=0, alignment=Qt.Alignment()):
         self._layout_proxy.addWidget(widget, stretch, alignment)
 
     def addLayout(self, layout, stretch=0):
         self._layout_proxy.addLayout(layout, stretch)
 
-    def setRadius(self, radius):
-        self._border_radius = radius
-        self.update()
+    def addStretch(self, stretch=0):
+        self._layout_proxy.addStretch(stretch)
+        
+    def addSpacing(self, size):
+        self._layout_proxy.addSpacing(size)
+        
+    def contentLayout(self):
+        # En caso de que interface.py acceda directamente a .content_layout
+        # ya lo definimos en __init__ como self.content_layout
+        return self._layout_proxy
 
+    # --- INTERNOS ---
     def setLayout(self, layout):
-        # Override para mantener la estructura interna del shield en Mac
         if sys.platform == "darwin":
             QWidget().setLayout(self._layout_proxy) 
             self._layout_proxy = layout
@@ -228,86 +239,73 @@ class NativeGlassWidget(QWidget):
             self._layout_proxy = layout
             self.content_layout = layout
 
-    # --- EVENTO CLAVE: SHOW ---
     def showEvent(self, event):
         super().showEvent(event)
         
         if sys.platform == "win32":
-            # MOMENTO DE LA VERDAD EN WINDOWS
+            # DECISIÓN TARDÍA EN WINDOWS
             if self.isWindow():
-                # Soy Ventana Principal -> Activar DWM Nativo
-                self._is_simulated_mode = False
-                # Pequeño hack: forzar actualización de atributos si cambiaron
+                # Es Ventana Principal -> Modo Nativo
+                self._is_simulated = False
                 self.setAttribute(Qt.WA_NativeWindow, True) 
                 apply_glass_logic(self, self._style, GlassTheme.get_current_mode())
                 self.window().repaint()
             else:
-                # Soy Hijo (Sidebar dentro de MainWindow) -> Activar Simulación
-                self._is_simulated_mode = True
-                self.setAttribute(Qt.WA_NativeWindow, False) # Asegurar que sea Alien
-                self.update() # Forzar pintado del tinte
+                # Es Hijo (Sidebar/Content) -> Modo Simulado
+                self._is_simulated = True
+                self.setAttribute(Qt.WA_NativeWindow, False)
+                self.update() # Forzar pintado
                 
         elif sys.platform == "darwin":
-            # En Mac siempre aplicamos lógica nativa
+            # Mac siempre nativo
             apply_glass_logic(self, self._style, GlassTheme.get_current_mode())
 
     def _on_mode_changed(self, mode):
-        # Reaplicar efecto si es necesario
-        if sys.platform == "darwin" or (sys.platform == "win32" and not self._is_simulated_mode):
+        if sys.platform == "darwin" or (sys.platform == "win32" and not self._is_simulated):
             apply_glass_logic(self, self._style, mode)
         self.update()
 
     def paintEvent(self, event):
         if sys.platform == "win32":
-            if self._is_simulated_mode:
-                # MODIFICACIÓN CRÍTICA: Pintar Tinte Simulado
-                # Esto es lo que el usuario ve como "Sidebar Glass" en Windows
+            if self._is_simulated:
+                # Pintar tinte para hijos
                 self._paint_windows_tint()
             else:
-                # Ventana Madre: Limpiar para que DWM brille
+                # Limpiar ventana madre
                 painter = QPainter(self)
                 painter.setCompositionMode(QPainter.CompositionMode_Clear)
                 painter.fillRect(self.rect(), Qt.transparent)
         else:
-            # Mac: Comportamiento estándar
             super().paintEvent(event)
 
     def _paint_windows_tint(self):
-        """Dibuja rectángulos tintados con Alphas calibrados para Windows."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
         mode = GlassTheme.get_current_mode()
         is_dark = (mode == "dark")
         
-        # --- MATERIALES WINDOWS (ALPHAS AJUSTADOS PARA CONTRASTE) ---
-        # Sidebar: Oscuro y denso para separarse del fondo
+        # --- MATERIALES VISIBLES (ALPHAS) ---
         if self._style == GlassStyle.SIDEBAR:
-            # ~85% Opacidad
-            color = QColor(20, 20, 20, 220) if is_dark else QColor(240, 240, 240, 220)
-            
-        # Popover/Content: Más transparente para ver el blur de fondo
+            # Denso
+            color = QColor(25, 25, 25, 200) if is_dark else QColor(245, 245, 245, 200)
         elif self._style in [GlassStyle.POPOVER, GlassStyle.MENU]:
-            # ~40% Opacidad
-            color = QColor(40, 40, 40, 100) if is_dark else QColor(255, 255, 255, 100)
-            
+            # Muy transparente
+            color = QColor(40, 40, 40, 50) if is_dark else QColor(255, 255, 255, 50)
         elif self._style == GlassStyle.HEADER:
-            # ~60% Opacidad
-            color = QColor(30, 30, 30, 150) if is_dark else QColor(245, 245, 245, 150)
-            
+            color = QColor(30, 30, 30, 150) if is_dark else QColor(240, 240, 240, 150)
         elif self._style == GlassStyle.HUD:
-            # ~15% Opacidad
-            color = QColor(10, 10, 10, 40) if is_dark else QColor(255, 255, 255, 40)
-            
+            color = QColor(10, 10, 10, 30) if is_dark else QColor(255, 255, 255, 30)
         else:
-            color = QColor(30, 30, 30, 180) if is_dark else QColor(255, 255, 255, 180)
+            color = QColor(30, 30, 30, 100) if is_dark else QColor(255, 255, 255, 100)
 
         painter.setBrush(QBrush(color))
         painter.setPen(Qt.NoPen)
-        # Usamos rect() para llenar todo el widget hijo
-        painter.drawRoundedRect(self.rect(), self._border_radius, self._border_radius)
+        # Si interface.py no maneja radios, usamos 0 para llenar o un valor default pequeño
+        r = 0
+        painter.drawRoundedRect(self.rect(), r, r)
 
-# --- LÓGICA DE APLICACIÓN DE EFECTOS NATIVOS ---
+# --- LOGICA NATIVA ---
 def apply_glass_logic(target_object, style, mode):
     oid = int(target_object.winId())
     use_dark = (mode == "dark")
@@ -327,13 +325,11 @@ def apply_glass_logic(target_object, style, mode):
         from .windows.window_effect import WindowsWindowEffect
         effect = WindowsWindowEffect(target_object)
         
-        # Color base del Acrylic nativo (Solo Ventana Principal)
         bg = "050505" if use_dark else "F2F2F2"
-        # Alpha base: Qué tan transparente es la ventana contra el escritorio
+        # Alpha de la ventana principal
         alpha = "CC" 
             
         color_hex = f"{alpha}{bg}"
-        # Usamos Acrylic (Blur)
         effect.setAcrylicEffect(oid, gradientColor=color_hex, isDarkMode=use_dark)
 
 def apply_glass(target_object, style=GlassStyle.SIDEBAR, mode=None):
