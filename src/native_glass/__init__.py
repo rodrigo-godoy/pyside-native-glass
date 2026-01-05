@@ -2,18 +2,18 @@ import sys
 import os
 from enum import Enum
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QApplication, QPushButton
-from PySide6.QtCore import Qt, Signal, QObject
-from PySide6.QtGui import QPalette, QColor, QPainter
+from PySide6.QtCore import Qt, Signal, QObject, QEvent
+from PySide6.QtGui import QPalette, QColor, QPainter, QBrush
 
 # --- 1. ENUMS ---
 class GlassStyle(Enum):
-    SIDEBAR = "sidebar"
-    HEADER = "header"
-    SHEET = "sheet"
-    POPOVER = "popover"
-    HUD = "hud"
-    MENU = "menu"
-    FULL = "underWindow"
+    SIDEBAR = "sidebar"      # Fondo principal, más denso
+    HEADER = "header"        # Barras superiores, transparencia media
+    SHEET = "sheet"          # Diálogos modales
+    POPOVER = "popover"      # Menús flotantes / Tarjetas, muy transparente
+    HUD = "hud"              # Casi invisible
+    MENU = "menu"            # Menús contextuales
+    FULL = "underWindow"     # Fondo completo
 
 # --- 2. MOTOR DE TEMAS ---
 class ThemeManager(QObject):
@@ -24,7 +24,6 @@ class ThemeManager(QObject):
         self._mode = "system"
         self._semantic_colors = {}
         self._assets_path = "assets"
-        # Registramos colores base por defecto
         self.register_color("btn_hover", day="#E5E5E5", night="#3A3A3A")
 
     def set_assets_path(self, path):
@@ -36,7 +35,6 @@ class ThemeManager(QObject):
         self._apply_qt_palette(real_mode)
         self.mode_changed.emit(real_mode)
         
-        # Refresco agresivo de estilos
         app = QApplication.instance()
         if app:
             for widget in app.topLevelWidgets():
@@ -72,28 +70,16 @@ class ThemeManager(QObject):
             return QColor(self._semantic_colors[name][mode])
         return QColor(name)
 
-    def get_asset(self, filename):
-        mode = self.get_current_mode()
-        if mode == "light":
-            return os.path.join(self._assets_path, filename)
-        base, ext = os.path.splitext(filename)
-        dark_name = f"{base}_dark{ext}"
-        full_dark = os.path.join(self._assets_path, dark_name)
-        if os.path.exists(full_dark):
-            return full_dark
-        return os.path.join(self._assets_path, filename)
-
     def _calculate_dark_variant(self, hex_color):
         c = QColor(hex_color)
-        h, s, lum = c.getHslF()  # FIX: 'l' changed to 'lum'
+        h, s, lum = c.getHslF()
         new_lum = 1.0 - lum
         new_s = s * 0.8 if new_lum < 0.5 else s
         return QColor.fromHslF(h, new_s, new_lum).name()
 
     def _apply_qt_palette(self, mode):
         app = QApplication.instance()
-        if not app:
-            return
+        if not app: return
         palette = QPalette()
         if mode == "dark":
             base = QColor(30, 30, 30)
@@ -115,78 +101,61 @@ class ThemeManager(QObject):
 
 GlassTheme = ThemeManager()
 
-# --- 3. COMPONENTES UI ---
-
-class GlassButton(QPushButton):
-    def __init__(self, text, color_role=None, parent=None):
-        super().__init__(text, parent)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(34)
-        self._color_role = color_role
-        GlassTheme.mode_changed.connect(self._update_style)
-        self._update_style()
-
-    def _update_style(self, mode=None):
-        if self._color_role:
-            text_col = GlassTheme.get_color(self._color_role).name()
-        else:
-            text_col = "palette(text)"
-        hover_col = GlassTheme.get_color("btn_hover").name()
-        
-        self.setStyleSheet(f"""
-            QPushButton {{
-                color: {text_col};
-                background-color: transparent;
-                border: none;
-                border-radius: 6px;
-                text-align: left;
-                padding-left: 15px;
-                font-size: 13px;
-                font-family: '.AppleSystemUIFont', 'Segoe UI';
-                opacity: 0.9;
-            }}
-            QPushButton:hover {{
-                background-color: {hover_col};
-                font-weight: 600;
-            }}
-        """)
-
-# --- 4. WIDGET PRINCIPAL ---
+# --- 3. WIDGET INTELIGENTE ---
 class NativeGlassWidget(QWidget):
     def __init__(self, style=GlassStyle.SIDEBAR, parent=None):
         super().__init__(parent)
         self._style = style
+        self._border_radius = 10 # Radio por defecto para simulaciones
         GlassTheme.mode_changed.connect(self._on_mode_changed)
         
+        # Configuración base para transparencia en QT
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setStyleSheet("background: transparent;")
-        pal = self.palette()
-        pal.setColor(QPalette.Window, Qt.transparent)
-        self.setPalette(pal)
-
+        
+        # --- LÓGICA DE PLATAFORMA ---
         self._layout_proxy = None
-
+        
         if sys.platform == "darwin":
-            self.setAttribute(Qt.WA_NativeWindow, True)
+            # macOS soporta anidación nativa perfecta
+            self.setAttribute(Qt.WA_NativeWindow, True) 
             self.setAttribute(Qt.WA_NoSystemBackground, True)
+            
             self._root_layout = QVBoxLayout(self)
             self._root_layout.setContentsMargins(0, 0, 0, 0)
             self._root_layout.setSpacing(0)
+            
             self._shield = QWidget()
             self._shield.setAttribute(Qt.WA_NativeWindow, True)
             self._shield.setAttribute(Qt.WA_TranslucentBackground, True)
             self._shield.setStyleSheet("background: transparent;")
+            
             self._root_layout.addWidget(self._shield)
             self._layout_proxy = QVBoxLayout(self._shield)
+            
         elif sys.platform == "win32":
-            self.setAttribute(Qt.WA_NoSystemBackground, False)
-            self.setAttribute(Qt.WA_NativeWindow, False)
+            # Windows NO soporta anidación de Acrylic/Mica sin ghosting.
+            # ESTRATEGIA HÍBRIDA:
+            # - Si es Ventana (TopLevel): Usa API Nativa (DWM).
+            # - Si es Hijo (Child): Usa Simulación de Pintado (Qt Paint).
+            
+            self._is_toplevel = self.isWindow()
+            
+            if self._is_toplevel:
+                self.setAttribute(Qt.WA_NoSystemBackground, True)
+                # Solo activamos NativeWindow si somos ventana principal
+                self.setAttribute(Qt.WA_NativeWindow, True) 
+            else:
+                # Si somos hijo, NO somos ventana nativa para evitar conflictos DWM
+                self.setAttribute(Qt.WA_NativeWindow, False)
+                
             self._shield = None
             self._layout_proxy = QVBoxLayout(self)
 
         self._layout_proxy.setContentsMargins(0, 0, 0, 0)
         self._layout_proxy.setSpacing(0)
 
+    # --- API PÚBLICA (Simula layout normal) ---
     def addWidget(self, widget, stretch=0, alignment=Qt.Alignment()):
         self._layout_proxy.addWidget(widget, stretch, alignment)
 
@@ -198,41 +167,87 @@ class NativeGlassWidget(QWidget):
         
     def addSpacing(self, size):
         self._layout_proxy.addSpacing(size)
+        
+    def setRadius(self, radius):
+        """Permite ajustar el radio de borde para la simulación en Windows hijos"""
+        self._border_radius = radius
+        self.update()
 
+    # --- INTERNOS ---
     def setLayout(self, layout):
         if sys.platform == "darwin":
             QWidget().setLayout(self._layout_proxy) 
             self._layout_proxy = layout
             self._shield.setLayout(layout)
         else:
+            if self.layout():
+                QWidget().setLayout(self.layout())
             super().setLayout(layout)
             self._layout_proxy = layout
 
-    def contentLayout(self):
-        return self._layout_proxy
-
     def showEvent(self, event):
         super().showEvent(event)
-        if sys.platform == "win32":
-            self.window().repaint()
-        self._apply_effect()
+        # Aplicar efecto real solo si somos TopLevel en Windows o siempre en Mac
+        if sys.platform == "darwin" or (sys.platform == "win32" and self.isWindow()):
+            self._apply_effect()
+            if sys.platform == "win32":
+                self.window().repaint()
 
     def _on_mode_changed(self, mode):
-        self._apply_effect()
+        # Re-aplicar efecto nativo si corresponde
+        if sys.platform == "darwin" or (sys.platform == "win32" and self.isWindow()):
+            self._apply_effect()
+        # Siempre repintar (para actualizar simulaciones de hijos)
         self.update()
 
     def paintEvent(self, event):
+        # LÓGICA DE PINTADO HÍBRIDA
         if sys.platform == "win32":
-            painter = QPainter(self)
-            painter.setCompositionMode(QPainter.CompositionMode_Clear)
-            painter.fillRect(self.rect(), Qt.transparent)
+            if self.isWindow():
+                # Si es ventana principal, limpiar para dejar ver el Acrylic
+                painter = QPainter(self)
+                painter.setCompositionMode(QPainter.CompositionMode_Clear)
+                painter.fillRect(self.rect(), Qt.transparent)
+            else:
+                # SI ES HIJO: SIMULAR MATERIAL
+                # Esto arregla el "Fondo Negro" y la "Duplicidad"
+                self._paint_windows_simulation()
         else:
             super().paintEvent(event)
+
+    def _paint_windows_simulation(self):
+        """Pinta un fondo semitransparente para simular capas de cristal en Windows hijos."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        mode = GlassTheme.get_current_mode()
+        is_dark = (mode == "dark")
+        
+        # PALETA DE COLORES "HYPER-VIVID" PARA WINDOWS (Más notorios)
+        # Ajustamos los alphas para que se note la diferencia de material
+        if self._style == GlassStyle.SIDEBAR:
+            # Sidebar: Oscuro/Claro denso pero visiblemente translúcido
+            color = QColor(20, 20, 20, 180) if is_dark else QColor(245, 245, 245, 180)
+        elif self._style == GlassStyle.POPOVER:
+            # Popover: Muy transparente, efecto "flotante"
+            color = QColor(45, 45, 45, 140) if is_dark else QColor(255, 255, 255, 140)
+        elif self._style == GlassStyle.HEADER:
+            color = QColor(30, 30, 30, 160) if is_dark else QColor(240, 240, 240, 160)
+        elif self._style == GlassStyle.HUD:
+            color = QColor(10, 10, 10, 80) if is_dark else QColor(255, 255, 255, 80)
+        else:
+            color = QColor(30, 30, 30, 200) if is_dark else QColor(255, 255, 255, 200)
+
+        painter.setBrush(QBrush(color))
+        painter.setPen(Qt.NoPen)
+        # Usamos un radio de borde para que se vea moderno
+        painter.drawRoundedRect(self.rect(), self._border_radius, self._border_radius)
 
     def _apply_effect(self):
         mode = GlassTheme.get_current_mode()
         apply_glass_logic(self, self._style, mode)
 
+# --- LÓGICA DE APLICACIÓN DE EFECTOS NATIVOS ---
 def apply_glass_logic(target_object, style, mode):
     oid = int(target_object.winId())
     use_dark = (mode == "dark")
@@ -252,21 +267,35 @@ def apply_glass_logic(target_object, style, mode):
         from .windows.window_effect import WindowsWindowEffect
         effect = WindowsWindowEffect(target_object)
         
-        bg = "101010" if use_dark else "FFFFFF"
-        alpha = "CC"
+        # CONFIGURACIÓN DE ALPHAS PARA WINDOWS 11 (VENTANA MADRE)
+        # Aquí definimos qué tan transparente es la ventana principal
+        # Hex AABBGGRR -> AA es Alpha.
+        # Bajamos los alphas para hacer el efecto MÁS NOTORIO en el fondo.
+        
+        bg = "050505" if use_dark else "F0F0F0" # Color base casi negro/blanco
+        
+        # AJUSTES DE "NOTORIEDAD"
         if style in [GlassStyle.SIDEBAR, GlassStyle.FULL]:
-            alpha = "CC" if use_dark else "99"
+            # Antes CC (80%), Ahora A0 (~60%) -> Más transparente
+            alpha = "A0" if use_dark else "A0"
         elif style in [GlassStyle.HEADER, GlassStyle.SHEET]:
-            alpha = "99" if use_dark else "80"
+            alpha = "40" if use_dark else "70"
         elif style in [GlassStyle.MENU, GlassStyle.POPOVER]:
-            alpha = "66" if use_dark else "4D"
+            alpha = "30" if use_dark else "50"
         elif style == GlassStyle.HUD:
-            alpha = "0A"
+            alpha = "10" # Muy fantasma
+        else:
+            alpha = "99"
             
         color_hex = f"{alpha}{bg}"
+        # Usamos Acrylic (Blur) que es más bonito que Mica (Opaco)
         effect.setAcrylicEffect(oid, gradientColor=color_hex, isDarkMode=use_dark)
 
 def apply_glass(target_object, style=GlassStyle.SIDEBAR, mode=None):
+    """
+    Helper function para aplicar manualmente glass a una ventana existente.
+    Útil para diálogos QDialog estándar.
+    """
     if mode is None:
         mode = GlassTheme.get_current_mode()
     apply_glass_logic(target_object, style, mode)
