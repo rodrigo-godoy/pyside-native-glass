@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyside-native-glass"
-version = "0.2.0"
+version = "0.3.0"
 description = "Efectos nativos de ventana (Glass/Acrylic/Mica) para aplicaciones PySide6 en Windows 11 y macOS."
 readme = "README.md"
 requires-python = ">=3.9"
