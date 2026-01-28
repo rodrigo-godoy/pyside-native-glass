@@ -47,9 +47,9 @@ class ThemeManager(QObject):
 
     def set_mode(self, mode):
         self._mode = mode
-        real_mode = self.get_current_mode()
-        self._apply_qt_palette(real_mode)
-        self.mode_changed.emit(real_mode)
+        self._real_mode = self.get_current_mode()
+        self._apply_qt_palette(self._real_mode)
+        self.mode_changed.emit(self._real_mode)
         
         app = QApplication.instance()
         if app:
@@ -156,9 +156,11 @@ class GlassButton(QPushButton):
 
 # --- 5. WIDGET NATIVO ---
 class NativeGlassWidget(QWidget):
-    def __init__(self, style=GlassStyle.SIDEBAR, parent=None, **kwargs):
+    # AQUI ESTA EL CAMBIO: Agregamos tint_color=None al constructor
+    def __init__(self, style=GlassStyle.SIDEBAR, tint_color=None, parent=None, **kwargs):
         super().__init__(parent)
         self._style = style
+        self._tint_color = tint_color # Guardamos el tinte personalizado
         self._border_radius = 0
         self._corner_mask = kwargs.get('corner_mask', None)
 
@@ -264,37 +266,47 @@ class NativeGlassWidget(QWidget):
         is_dark = (mode == "dark")
         
         # --- DEFINICIÓN DE MATERIALES ---
-        # Estos son los tintes que se verán sobre el fondo Acrylic borroso
         
-        if self._style == GlassStyle.SIDEBAR:
-            # Tinte Sidebar: Gris Oscuro/Claro semitransparente
-            alpha = 150 if is_dark else 180 
-            color = QColor(25, 25, 25, alpha) if is_dark else QColor(245, 245, 245, alpha)
+        # AQUI ESTA EL CAMBIO: Prioridad al color personalizado si existe
+        if self._tint_color is not None:
+            # Si el usuario pasó un tinte, USAMOS ESE
+            color = QColor(self._tint_color)
             painter.setPen(Qt.NoPen)
-            
-        elif self._style == GlassStyle.HEADER:
-            # Header: Muy transparente
-            alpha = 40 
-            color = QColor(20, 20, 20, alpha) if is_dark else QColor(255, 255, 255, alpha)
-            painter.setPen(Qt.NoPen)
-            
-        elif self._style in [GlassStyle.POPOVER, GlassStyle.MENU]:
-            # Popover: Más marcado
-            alpha = 210
-            if is_dark:
-                color = QColor(40, 40, 40, alpha)
-                border = QColor(255, 255, 255, 30)
-            else:
-                color = QColor(255, 255, 255, alpha)
-                border = QColor(0, 0, 0, 20)
-            painter.setPen(QPen(border, 1))
+            painter.setBrush(QBrush(color))
             
         else:
-            alpha = 100
-            color = QColor(128, 128, 128, alpha)
-            painter.setPen(Qt.NoPen)
-
-        painter.setBrush(QBrush(color))
+            # Si no, usamos los defaults grises de la librería
+            if self._style == GlassStyle.SIDEBAR:
+                # Tinte Sidebar: Gris Oscuro/Claro semitransparente
+                alpha = 150 if is_dark else 180 
+                color = QColor(25, 25, 25, alpha) if is_dark else QColor(245, 245, 245, alpha)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(color))
+                
+            elif self._style == GlassStyle.HEADER:
+                # Header: Muy transparente
+                alpha = 40 
+                color = QColor(20, 20, 20, alpha) if is_dark else QColor(255, 255, 255, alpha)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(color))
+                
+            elif self._style in [GlassStyle.POPOVER, GlassStyle.MENU]:
+                # Popover: Más marcado
+                alpha = 210
+                if is_dark:
+                    color = QColor(40, 40, 40, alpha)
+                    border = QColor(255, 255, 255, 30)
+                else:
+                    color = QColor(255, 255, 255, alpha)
+                    border = QColor(0, 0, 0, 20)
+                painter.setPen(QPen(border, 1))
+                painter.setBrush(QBrush(color))
+                
+            else:
+                alpha = 100
+                color = QColor(128, 128, 128, alpha)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(color))
         
         rect = self.rect()
         r = self._border_radius
